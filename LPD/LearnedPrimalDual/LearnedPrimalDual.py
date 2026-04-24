@@ -34,10 +34,10 @@ def AT_keras(x):
 
 def conv(input, out_channels):
     x = layers.Conv2D(32, kernel_size = 3, padding = 'same')(input)
-    x = layers.Activation('relu')(x)
+    x = layers.PReLU()(x)
 
     x = layers.Conv2D(32, kernel_size = 3, padding = 'same')(x)
-    x = layers.Activation('relu')(x)
+    x = layers.PReLU()(x)
 
     x = layers.Conv2D(out_channels, kernel_size = 3, padding = 'same')(x)
     
