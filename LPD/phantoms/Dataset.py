@@ -1,62 +1,65 @@
 import numpy as np
-from PIL import Image
 import random
 
 import os
-from skimage.io import imread, imsave
-from skimage.transform import radon, iradon, resize
-from skimage.color import rgb2gray
 
 from tensorflow import keras
 from keras.utils import load_img, img_to_array
 
-def generate_custom_data_set(quant_of_phantoms : int, x_path : str, y_path, projections : list[int]) -> None:
-    
-    ## Generating x
+import odl
+
+def generate_custom_data_set(size : int, quant_of_phantoms : int, x_path : str, y_path, projections : list[int]) -> None:
+
+    ## Generating y
     
     for i in range(quant_of_phantoms):
         print(i)
 
-        phantom = generate_random_phantom(size=512, num_ellipses=random.randrange(2, 14), seed=None)
+        phantom = generate_random_phantom(size, num_ellipses=random.randrange(2, 14), seed=None)
 
-        img_uint8 = ((phantom - phantom.min()) /
-                     (phantom.max() - phantom.min()) * 255).astype(np.uint8)
+        np.save(os.path.join(y_path, f"{i}.npy"), phantom.astype(np.float32))
 
-        Image.fromarray(img_uint8).save(y_path + "/" + str(i) + ".png")
+    ## Generating x
 
-    
-    ## Generating y
-    
+    # Espaço do ODL (mesmo do modelo)
+    space = odl.uniform_discr(
+        [-size/2, -size/2],
+        [size/2, size/2],
+        [size, size],
+        dtype='float32'
+    )
+
     for n_proj in projections:
         os.makedirs(os.path.join(x_path, str(n_proj)), exist_ok=True)
 
-    image_files = [f for f in os.listdir(y_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif'))]
+        # Definindo geometria com número de projeções
+        angle_partition = odl.uniform_partition(0.0, np.pi, n_proj)
+        detector_partition = odl.uniform_partition(-size/2, size/2, size)
 
-    for img_name in image_files:
-        img_path = os.path.join(y_path, img_name)
-        print(f"Processando {img_name}...")
+        geometry = odl.tomo.Parallel2dGeometry(angle_partition, detector_partition)
+        operator = odl.tomo.RayTransform(space, geometry)
 
-        image = imread(img_path)
-        if image.ndim == 3:
-            image = rgb2gray(image)
-        image = resize(image, (512, 512))
+        image_files = [f for f in os.listdir(y_path) if f.lower().endswith(('.npy'))]
 
-        for n_proj in projections:
-            theta = np.linspace(0., 180., n_proj, endpoint=False)
+        for img_name in image_files:
+            print(f"Processando {img_name}...")
 
-            # Forward projection (Radon)
-            sinogram = radon(image, theta=theta, circle=False)
+            # Converter para ODL
+            image_odl = space.element(phantom)
 
-            # Reconstrução (Inverse Radon)
-            reconstruction = iradon(sinogram, theta=theta, circle=False)
+            # Forward projection (ODL)
+            sinogram = operator(image_odl)
 
-            reconstruction = (reconstruction - reconstruction.min()) / (reconstruction.max() - reconstruction.min())
+            # (Opcional) adicionar ruído
+            sinogram = sinogram + 0.01 * odl.phantom.white_noise(operator.range)
 
-            reconstruction_uint8 = (reconstruction * 255).astype(np.uint8)
+            # Converter para numpy
+            sinogram_np = sinogram.asarray()
+
+            sinogram_np = sinogram.asarray().astype(np.float32)
 
             out_path = os.path.join(x_path, str(n_proj), img_name)
-            imsave(out_path, reconstruction_uint8)
-
+            np.save(out_path.replace(".png", ".npy"), sinogram_np.astype(np.float32))
 
 def load_dataset_X_n_Y(x_path : str, y_path : str) -> tuple[np.ndarray, np.ndarray]:
     X = []
@@ -66,14 +69,18 @@ def load_dataset_X_n_Y(x_path : str, y_path : str) -> tuple[np.ndarray, np.ndarr
     y_files = sorted(os.listdir(y_path))
 
     for x_file, y_file in zip(x_files, y_files):
-        x_img = load_img(os.path.join(x_path, x_file), color_mode="grayscale")
+        # Carregar sinograma
+        x = np.load(os.path.join(x_path, x_file))
+
+        # Carregar phantom (imagem)
         y_img = load_img(os.path.join(y_path, y_file), color_mode="grayscale")
+        y = img_to_array(y_img) / 255.0
 
-        x_img = img_to_array(x_img) / 255.0
-        y_img = img_to_array(y_img) / 255.0
+        # Adicionar canal
+        x = np.expand_dims(x, axis=-1)
 
-        X.append(x_img)
-        Y.append(y_img)
+        X.append(x.astype(np.float32))
+        Y.append(y.astype(np.float32))
 
     return np.array(X), np.array(Y)
 
