@@ -3,8 +3,34 @@ from keras import layers, models
 import odl
 import odl.contrib.tensorflow as odl_tf
 
+import numpy as np
 
-def build_operator(size):
+class ODLForwardLayer(layers.Layer):
+    def __init__(self, odl_layer, output_shape_, **kwargs):
+        super().__init__(**kwargs)
+        self.odl_layer = odl_layer
+        self._output_shape = output_shape_
+
+    def call(self, inputs):
+        return self.odl_layer(inputs)
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], *self._output_shape, 1)
+
+
+class ODLAdjointLayer(layers.Layer):
+    def __init__(self, odl_layer, size, **kwargs):
+        super().__init__(**kwargs)
+        self.odl_layer = odl_layer
+        self.size = size
+
+    def call(self, inputs):
+        return self.odl_layer(inputs)
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], self.size, self.size, 1)
+
+def build_operator(size, n_proj):
     space = odl.uniform_discr(
         [-size/2, -size/2],
         [size/2, size/2],
@@ -12,7 +38,10 @@ def build_operator(size):
         dtype='float32'
     )
 
-    geometry = odl.tomo.parallel_beam_geometry(space)
+    angle_partition = odl.uniform_partition(0.0, np.pi, n_proj)
+    detector_partition = odl.uniform_partition(-size/2, size/2, size)
+
+    geometry = odl.tomo.Parallel2dGeometry(angle_partition, detector_partition)
     operator = odl.tomo.RayTransform(space, geometry)
 
     opnorm = odl.power_method_opnorm(operator)
@@ -24,20 +53,6 @@ def build_operator(size):
     sinogram_shape = operator.range.shape
 
     return A_layer, AT_layer, sinogram_shape
-
-
-def A_keras(x, A_layer, sinogram_shape):
-    return layers.Lambda(
-        lambda t: A_layer(t),
-        output_shape=(sinogram_shape[0], sinogram_shape[1], 1)
-    )(x)
-
-
-def AT_keras(x, AT_layer, size):
-    return layers.Lambda(
-        lambda t: AT_layer(t),
-        output_shape=(size, size, 1)
-    )(x)
 
 
 def conv(x, out_channels):
@@ -56,15 +71,18 @@ def dual(d, Ap, g, n_dual):
     return layers.Add()([y, d])
 
 def primal(d, p, AT_layer, size, n_primal):
-    At_d = AT_keras(d[..., 0:1], AT_layer, size)
+    At_d = AT_layer(d[..., 0:1])
     
     y = layers.Concatenate()([p, At_d])
     y = conv(y, n_primal)
     
     return layers.Add()([y, p])
 
-def learned_primal_dual_model(size = 128, n_primal = 5, n_dual = 5, n_iter=10):
-    A_layer, AT_layer, sinogram_shape = build_operator(size)
+def learned_primal_dual_model(n_proj, size = 128, n_primal = 5, n_dual = 5, n_iter=10):
+    A_layer_tf, AT_layer_tf, sinogram_shape = build_operator(size, n_proj)
+
+    A_layer = ODLForwardLayer(A_layer_tf, sinogram_shape)
+    AT_layer = ODLAdjointLayer(AT_layer_tf, size)
 
     g_input = layers.Input((*sinogram_shape, 1))
     p0 = layers.Input((size, size, n_primal))
@@ -73,19 +91,19 @@ def learned_primal_dual_model(size = 128, n_primal = 5, n_dual = 5, n_iter=10):
     p_k = p0
     d_k = d0
 
-    Ap = A_keras(p_k[..., 1:2], A_layer, sinogram_shape)
+    Ap = A_layer(p_k[..., 1:2])
 
     for _ in range(n_iter):
         d_k = dual(d_k, Ap, g_input, n_dual)
         p_k = primal(d_k, p_k, AT_layer, size, n_primal)
-        Ap = A_keras(p_k[..., 1:2], A_layer, sinogram_shape)
+        Ap = A_layer(p_k[..., 1:2])
 
     output = p_k[..., 0:1]
 
     model = models.Model(
         inputs=[g_input, p0, d0],
         outputs=output,
-        name='Learned Primal Dual'
+        name='Learned-Primal-Dual'
     )
 
     return model

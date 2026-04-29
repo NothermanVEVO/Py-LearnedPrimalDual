@@ -1,20 +1,22 @@
-import LearnedPrimalDual.LearnedPrimalDual as LearnedPrimalDual
+# import LearnedPrimalDual.LearnedPrimalDual as LearnedPrimalDual
 
-print("Creating model...")
+# print("Creating model...")
 
-model = LearnedPrimalDual.learned_primal_dual_model()
+# model = LearnedPrimalDual.learned_primal_dual_model(15)
 
-model.summary()
+# model.summary()
 
-QUANT_OF_TRAIN_IMGS = 5
+#################################################################################
+
+QUANT_OF_TRAIN_IMGS = 2
 X_TRAIN_PATH = "dataset/x_train"
 Y_TRAIN_PATH = "dataset/y_train"
 
-QUANT_OF_TEST_IMGS = 5
+QUANT_OF_TEST_IMGS = 2
 X_TEST_PATH = "dataset/x_test"
 Y_TEST_PATH = "dataset/y_test"
 
-PROJECTIONS = [15]
+PROJECTIONS = [90]
 
 import os
 import phantoms.Dataset as Dataset

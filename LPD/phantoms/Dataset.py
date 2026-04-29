@@ -39,19 +39,18 @@ def generate_custom_data_set(size : int, quant_of_phantoms : int, x_path : str, 
         geometry = odl.tomo.Parallel2dGeometry(angle_partition, detector_partition)
         operator = odl.tomo.RayTransform(space, geometry)
 
-        image_files = [f for f in os.listdir(y_path) if f.lower().endswith(('.npy'))]
+        image_files = [f for f in os.listdir(y_path) if f.lower().endswith('.npy')]
 
         for img_name in image_files:
             print(f"Processando {img_name}...")
 
+            phantom = np.load(os.path.join(y_path, img_name))
+
             # Converter para ODL
-            image_odl = space.element(phantom)
+            image_odl = space.element(phantom.astype('float32'))
 
             # Forward projection (ODL)
             sinogram = operator(image_odl)
-
-            # (Opcional) adicionar ruído
-            sinogram = sinogram + 0.01 * odl.phantom.white_noise(operator.range)
 
             # Converter para numpy
             sinogram_np = sinogram.asarray()
@@ -59,7 +58,7 @@ def generate_custom_data_set(size : int, quant_of_phantoms : int, x_path : str, 
             sinogram_np = sinogram.asarray().astype(np.float32)
 
             out_path = os.path.join(x_path, str(n_proj), img_name)
-            np.save(out_path.replace(".png", ".npy"), sinogram_np.astype(np.float32))
+            np.save(out_path, sinogram_np.astype(np.float32))
 
 def load_dataset_X_n_Y(x_path : str, y_path : str) -> tuple[np.ndarray, np.ndarray]:
     X = []
